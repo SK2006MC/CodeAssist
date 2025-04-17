@@ -6,15 +6,16 @@ import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
 import androidx.core.content.res.ResourcesCompat;
 import androidx.recyclerview.widget.DiffUtil;
+import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.tyron.builder.model.DiagnosticWrapper;
@@ -22,100 +23,51 @@ import com.tyron.code.R;
 
 import javax.tools.Diagnostic;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 
-public class LogAdapter extends RecyclerView.Adapter<LogAdapter.ViewHolder>{
+public class LogAdapter extends ListAdapter<DiagnosticWrapper, LogAdapter.ViewHolder> {
 
     public interface OnClickListener {
         void onClick(DiagnosticWrapper diagnostic);
     }
 
-    private final List<DiagnosticWrapper> mData = new ArrayList<>();
     private OnClickListener mListener;
 
     public LogAdapter() {
-
+        super(new DiffCallback());
     }
 
     public void setListener(OnClickListener listener) {
         mListener = listener;
     }
 
-    public void submitList(List<DiagnosticWrapper> newData) {
-        DiffUtil.DiffResult result = DiffUtil.calculateDiff(new DiffUtil.Callback() {
-            @Override
-            public int getOldListSize() {
-                return mData.size();
-            }
-
-            @Override
-            public int getNewListSize() {
-                return newData.size();
-            }
-
-            @Override
-            public boolean areItemsTheSame(int oldItemPosition, int newItemPosition) {
-                return mData.get(oldItemPosition).equals(newData.get(newItemPosition));
-            }
-
-            @Override
-            public boolean areContentsTheSame(int oldItemPosition, int newItemPosition) {
-                return mData.get(oldItemPosition).equals(newData.get(newItemPosition));
-            }
-        });
-        mData.clear();
-        mData.addAll(newData);
-        try {
-            result.dispatchUpdatesTo(this);
-        } catch (IndexOutOfBoundsException e) {
-            notifyDataSetChanged();
-        }
-    }
-
     @NonNull
     @Override
     public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        FrameLayout layout = new FrameLayout(parent.getContext());
-        layout.setLayoutParams(new RecyclerView.LayoutParams(
-                RecyclerView.LayoutParams.MATCH_PARENT,
-                RecyclerView.LayoutParams.WRAP_CONTENT));
-        return new ViewHolder(layout);
+        View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.log_item, parent, false);
+        return new ViewHolder(view);
     }
 
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-        holder.bind(mData.get(position));
+        holder.bind(getItem(position));
     }
 
-    @Override
-    public int getItemCount() {
-        return mData.size();
-    }
+    public static class ViewHolder extends RecyclerView.ViewHolder {
+        private final TextView textView;
 
-    public class ViewHolder extends RecyclerView.ViewHolder {
-
-        public TextView textView;
-
-        public ViewHolder(FrameLayout layout) {
-            super(layout);
-
-            textView = new TextView(layout.getContext());
-            textView.setTypeface(ResourcesCompat.getFont(layout.getContext(), R.font.jetbrains_mono_regular));
-            textView.setMovementMethod(LinkMovementMethod.getInstance());
-            layout.addView(textView);
+        public ViewHolder(@NonNull View itemView) {
+            super(itemView);
+            textView = itemView.findViewById(R.id.log_text_view);
         }
 
         public void bind(DiagnosticWrapper diagnostic) {
-            if (diagnostic.getMessage(Locale.getDefault()) == null) {
+            if (diagnostic == null || diagnostic.getMessage(Locale.getDefault()) == null) {
+                textView.setText("");
                 return;
             }
+
             SpannableStringBuilder builder = new SpannableStringBuilder();
-//            if (diagnostic.getKind() != null) {
-//                builder.append(new ForegroundColorSpan(getColor(diagnostic.getKind())),
-//                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-//            }
             if (diagnostic.getKind() == Diagnostic.Kind.ERROR) {
                 builder.append(diagnostic.getMessage(Locale.getDefault()),
                         new ForegroundColorSpan(getColor(diagnostic.getKind())),
@@ -123,55 +75,59 @@ public class LogAdapter extends RecyclerView.Adapter<LogAdapter.ViewHolder>{
             } else {
                 builder.append(diagnostic.getMessageCharSequence());
             }
+
             if (diagnostic.getSource() != null) {
                 builder.append(' ');
                 addClickableFile(builder, diagnostic);
             }
+
             textView.setText(builder);
+            textView.setMovementMethod(LinkMovementMethod.getInstance());
         }
-    }
 
-    @ColorInt
-    private int getColor(Diagnostic.Kind kind) {
-        switch (kind) {
-            case ERROR:
-                return 0xffcf6679;
-            case MANDATORY_WARNING:
-            case WARNING:
-                return Color.YELLOW;
-            case NOTE:
-                return Color.CYAN;
-            default:
-                return 0xffFFFFFF;
+        @ColorInt
+        private int getColor(Diagnostic.Kind kind) {
+            switch (kind) {
+                case ERROR:
+                    return 0xffcf6679;
+                case MANDATORY_WARNING:
+                case WARNING:
+                    return Color.YELLOW;
+                case NOTE:
+                    return Color.CYAN;
+                default:
+                    return 0xffFFFFFF;
+            }
         }
-    }
 
-    private void addClickableFile(SpannableStringBuilder sb, final DiagnosticWrapper diagnostic) {
-        if (diagnostic.getSource() == null || !diagnostic.getSource().exists()) {
-            return;
-        }
-        if (diagnostic.getOnClickListener() != null) {
+        private void addClickableFile(SpannableStringBuilder sb, final DiagnosticWrapper diagnostic) {
+            if (diagnostic.getSource() == null || !diagnostic.getSource().exists()) {
+                return;
+            }
+
             ClickableSpan span = new ClickableSpan() {
                 @Override
                 public void onClick(@NonNull View widget) {
-                    diagnostic.getOnClickListener().onClick(widget);
+                    if (diagnostic.getOnClickListener() != null) {
+                        diagnostic.getOnClickListener().onClick(widget);
+                    }
                 }
             };
-            sb.append("[" + diagnostic.getExtra() + "]", span, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            return;
+
+            String label = diagnostic.getSource().getName() + ":" + diagnostic.getLineNumber();
+            sb.append("[").append(label).append("]", span, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
-        ClickableSpan span = new ClickableSpan() {
-            @Override
-            public void onClick(@NonNull View view) {
-                if (mListener != null) {
-                    mListener.onClick(diagnostic);
-                }
-            }
-        };
+    }
 
-        String label = diagnostic.getSource().getName();
-        label = label + ":" + diagnostic.getLineNumber();
+    public static class DiffCallback extends DiffUtil.ItemCallback<DiagnosticWrapper> {
+        @Override
+        public boolean areItemsTheSame(@NonNull DiagnosticWrapper oldItem, @NonNull DiagnosticWrapper newItem) {
+            return oldItem.equals(newItem);
+        }
 
-        sb.append("[" + label + "]", span, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        @Override
+        public boolean areContentsTheSame(@NonNull DiagnosticWrapper oldItem, @NonNull DiagnosticWrapper newItem) {
+            return oldItem.equals(newItem);
+        }
     }
 }
